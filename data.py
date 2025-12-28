@@ -46,4 +46,8 @@ class TimeSeriesDataset(Dataset):
 
 def load_prices_from_csv(path, price_column='Close'):
     df = pd.read_csv(path)
-    return df[price_column].values
+    
+    df[price_column] = pd.to_numeric(df[price_column], errors="coerce")
+    df = df.dropna(subset=[price_column])
+
+    return df[price_column].values.astype(np.float32)
