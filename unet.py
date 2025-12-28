@@ -38,14 +38,14 @@ class UNet(nn.Module):
         self.down1 = ConvBlock(1, base_ch)
         self.down2 = ConvBlock(base_ch, base_ch * 2)
 
-        self.pool = nn.AvgPool1d()
+        self.pool = nn.AvgPool1d(2)
 
         self.mid = ConvBlock(base_ch * 2, base_ch * 2)
 
         self.up = nn.Upsample(scale_factor=2, mode="nearest")
         self.up1 = ConvBlock(base_ch * 2 + base_ch, base_ch)
 
-        self.out = ConvBlock(base_ch, 1, 1)
+        self.out = nn.Conv1d(base_ch, 1, kernel_size=1)
 
     def forward(self, x, t):
         x = x.unsqueeze(1)
