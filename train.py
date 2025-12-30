@@ -83,7 +83,7 @@ def main():
     ).to(DEVICE)
     print()
 
-    optimizer = optim.AdamW(model.parameters, lr=LR, weight_decay=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=0.01)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=NUM_EPOCHS)
 
     Path(SAVE_DIR).mkdir(exist_ok=True)
