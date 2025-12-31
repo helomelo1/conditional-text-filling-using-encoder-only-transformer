@@ -54,7 +54,7 @@ def main():
     HIDDEN_SIZE = 512
     NUM_LAYERS = 6
     NUM_HEADS = 8
-    LR = 3e-4
+    LR = 7e-4
     NUM_EPOCHS = 10
     SAVE_DIR = "checkpoints"
 
