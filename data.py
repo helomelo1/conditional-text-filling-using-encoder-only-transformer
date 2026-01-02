@@ -1,42 +1,17 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from transformers import AutoTokenizer
 import random
 from pathlib import Path
 
 
 class TextInfillingDataset(Dataset):
-    def __init__(self, data_dir, max_length=128, mask_ratio=0.15, max_samples=None):
-        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+    def __init__(self, texts, tokenizer, max_length=128, mask_ratio=0.15):
+        self.texts = texts
+        self.tokenizer = tokenizer
         self.max_length = max_length
         self.mask_ratio = mask_ratio
-        self.mask_token_id = self.tokenizer.mask_token_id
-
-        self.texts = []
-        data_path = Path(data_dir)
-
-        # loading from pos and neg folder
-        for folder in ['pos', 'neg']:
-            folder_path = data_path / folder
-            if not folder_path.exists():
-                continue
-
-            for txt_file in folder_path.glob('*.txt'):
-                with open(txt_file, 'r', encoding='utf-8') as f:
-                    text = f.read().strip()
-                    text = text.replace('<br />', ' ').replace('<br/>', ' ')
-                    text = ' '.join(text.split())
-
-                    if 50 < len(text) < 5000:
-                        self.texts.append(text)
-                
-                if max_samples and len(self.texts) >= max_samples:
-                    break
-
-            if max_samples and len(self.texts) >= max_samples:
-                break
-
-        print(f"Loaded {len(self.texts)} samples from {data_dir}")
+        self.mask_token_id = tokenizer.mask_token_id
 
     def __len__(self):
         return len(self.texts)
@@ -62,7 +37,13 @@ class TextInfillingDataset(Dataset):
     def __getitem__(self, idx):
         text = self.texts[idx]
 
-        enc = self.tokenizer(text, max_length=self.max_length, padding='max_length', truncation=True, return_tensors='pt')
+        enc = self.tokenizer(
+            text, 
+            max_length=self.max_length, 
+            padding='max_length', 
+            truncation=True, 
+            return_tensors='pt'
+        )
 
         input_ids = enc['input_ids'].squeeze(0)
         attn_mask = enc['attention_mask'].squeeze(0)
@@ -75,44 +56,88 @@ class TextInfillingDataset(Dataset):
             'labels': labels,
             'mask_positions': mask_pos
         }
+
+
+def get_dataloaders(data_dir='aclImdb', batch_size=16, max_length=128, 
+                   train_split=0.8, max_samples=None):
+    print(f"loading data from {data_dir}...")
     
-def get_dataloaders(data_dir="aclImdb", batch_size=16, max_length=128, max_train=None, max_test=None):
-    train_data = TextInfillingDataset(
-        Path(data_dir) / 'train',
+    # initialize tokenizer once
+    tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+    
+    # load all texts from both train and test folders
+    all_texts = []
+    
+    for split_dir in ['train', 'test']:
+        data_path = Path(data_dir) / split_dir
+        
+        for folder in ['pos', 'neg']:
+            folder_path = data_path / folder
+            
+            if not folder_path.exists():
+                print(f"warning: {folder_path} not found")
+                continue
+            
+            for txt_file in folder_path.glob('*.txt'):
+                try:
+                    with open(txt_file, 'r', encoding='utf-8') as f:
+                        text = f.read().strip()
+                        
+                        # clean html
+                        text = text.replace('<br />', ' ').replace('<br/>', ' ')
+                        text = ' '.join(text.split())
+                        
+                        # filter by length
+                        if 50 < len(text) < 5000:
+                            all_texts.append(text)
+                except Exception as e:
+                    continue
+                
+                # stop if we hit max_samples
+                if max_samples and len(all_texts) >= max_samples:
+                    break
+            
+            if max_samples and len(all_texts) >= max_samples:
+                break
+        
+        if max_samples and len(all_texts) >= max_samples:
+            break
+    
+    print(f"loaded {len(all_texts)} total samples")
+    
+    # create full dataset
+    full_dataset = TextInfillingDataset(
+        texts=all_texts,
+        tokenizer=tokenizer,
         max_length=max_length,
-        max_samples=max_train
+        mask_ratio=0.15
     )
-
-    test_data = TextInfillingDataset(
-        Path(data_dir) / 'test',
-        max_length=max_length,
-        max_samples=max_test
+    
+    # split 80/20
+    train_size = int(train_split * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+    
+    train_dataset, val_dataset = random_split(
+        full_dataset, 
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)
     )
-
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=0)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=0)
-
-    return train_loader, test_loader, train_data.tokenizer
     
-# if __name__ == "__main__":
-#     # quick test
-#     train_loader, val_loader, tokenizer = get_dataloaders(
-#         batch_size=4, max_train=100, max_test=20
-#     )
+    print(f"train: {len(train_dataset)}, val: {len(val_dataset)}")
     
-#     batch = next(iter(train_loader))
-#     print(f"\ntrain batches: {len(train_loader)}")
-#     print(f"val batches: {len(val_loader)}")
+    # create loaders
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=0
+    )
     
-#     print(f"\nbatch shapes:")
-#     for k, v in batch.items():
-#         print(f"  {k}: {v.shape}")
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size, 
+        shuffle=False,
+        num_workers=0
+    )
     
-#     # show example
-#     masked = tokenizer.decode(batch['input_ids'][0])
-#     original = tokenizer.decode(batch['labels'][0], skip_special_tokens=True)
-#     n_masked = batch['mask_positions'][0].sum().item()
-    
-#     print(f"\noriginal: {original[:150]}...")
-#     print(f"masked: {masked[:150]}...")
-#     print(f"masked tokens: {n_masked}")
+    return train_loader, val_loader, tokenizer
